@@ -30,17 +30,18 @@ int twrapInit () {
         return 0;
     #endif
 }
-int twrapSocket (int block, int mode, char* host, char* serv) {
+int twrapSocket (int block, int nagle, int mode, char* host, char* serv) {
     //protocol-agnostically creates a new socket configured according to the given parameters
     //sockets have to be created and bound/connected all at once to allow for protocol-agnosticity
     //int: Whether to make the socket blocking or not, either TWRAP_NOBLOCK or TWRAP_BLOCK
+    //int: Whether to disable Nagle's algorithm or not, either TWRAP_NAGLE or TWRAP_NODELAY
     //int: Mode of the socket
     //  TWRAP_LISTEN: Listen on given address (or all interfaces if NULL) and port, e.g. for a server
     //  TWRAP_CONNECT: Immediately connect to given address (localhost if NULL), e.g. for a client
     //char*: Host/address as a string, can be IPv4, IPv6, etc...
     //char*: Service/port as a string, e.g. "1728" or "http"
     //returns socket handle or -1 on failure
-    int sock, flags = (mode == UWRAP_BIND) ? AI_PASSIVE : 0;
+    int sock, flags = (mode == TWRAP_LISTEN) ? AI_PASSIVE : 0;
     struct addrinfo* result, hint = {flags, AF_UNSPEC, SOCK_STREAM, 0, 0, NULL, NULL, NULL};
     //get address info
     if (getaddrinfo(host, serv, &hint, &result) != 0) return -1; //return -1 on error
@@ -56,6 +57,8 @@ int twrapSocket (int block, int mode, char* host, char* serv) {
         int no = 0;
         setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, (void*)&no, sizeof(no));
     }
+    //set TCP_NODELAY based on argument
+    setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (void*)&nagle, sizeof(nagle));
     //bind + listen if applicable
     if ((mode == TWRAP_LISTEN)&&((bind(sock, result->ai_addr, result->ai_addrlen))||(listen(sock, 64)))) {
         //close socket and return -1 on error
@@ -74,15 +77,12 @@ int twrapSocket (int block, int mode, char* host, char* serv) {
             twrapClose(sock);
             return -1;
         }
-        //non-blocking connect if applicable
-        if (mode == TWRAP_CONNECT) connect(sock, result->ai_addr, result->ai_addrlen);
-    } else if (mode == TWRAP_CONNECT) {
-        //blocking connect (return value relevant)
-        if (connect(sock, result->ai_addr, result->ai_addrlen)) {
-            //close socket and return -1 on error
-            twrapClose(sock);
-            return -1;
-        }
+    }
+    //connect if applicable
+    if ((mode == TWRAP_CONNECT)&&(connect(sock, result->ai_addr, result->ai_addrlen))&&(block == TWRAP_BLOCK)) {
+        //close socket and return -1 on error (only relevant if blocking)
+        twrapClose(sock);
+        return -1;
     }
     //free address info
     freeaddrinfo(result);
@@ -93,11 +93,26 @@ int twrapAccept (int sock, struct twrap_addr* addr) {
     //uses the given socket (must be TWRAP_LISTEN) to accept a new incoming connection, optionally returning its address
     //returns a socket handle for the new connection, or -1 on failure
     #ifdef TWRAP_WINDOWS
-        int addr_size = sizeof(struct uwrap_addr);
+        int addr_size = sizeof(struct twrap_addr);
     #else
-        socklen_t addr_size = sizeof(struct uwrap_addr);
+        socklen_t addr_size = sizeof(struct twrap_addr);
     #endif
-    return accept(sock, addr, addr_size);
+    return accept(sock, (struct sockaddr*)addr, (addr) ? &addr_size : NULL);
+}
+int twrapAddress (int sock, struct twrap_addr* addr) {
+    //writes the address the given socket is bound to into given address pointer, useful when automatically assigning ports
+    //returns 0 on success, non-zero on failure
+    #ifdef TWRAP_WINDOWS
+        int addr_size = sizeof(struct twrap_addr);
+    #else
+        socklen_t addr_size = sizeof(struct twrap_addr);
+    #endif
+    return getsockname(sock, (struct sockaddr*)addr, &addr_size);
+}
+int twrapAddressInfo (struct twrap_addr* addr, char* host, int host_size, char* serv, int serv_size) {
+    //writes the host/address and service/port of given address into given buffers (pointer + size), either buffer may be NULL
+    //returns 0 on success, non-zero on failure
+    return getnameinfo((struct sockaddr*)addr, sizeof(struct twrap_addr), host, host_size, serv, serv_size, 0);
 }
 int twrapSend (int sock, char* data, int data_size) {
     //uses the given socket (either TWRAP_CONNECT or returned by twrapAccept) to send given data (pointer + size)

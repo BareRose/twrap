@@ -13,6 +13,8 @@ If not, see <http://creativecommons.org/publicdomain/zero/1.0/>.
 //constants
 #define TWRAP_NOBLOCK 0
 #define TWRAP_BLOCK 1
+#define TWRAP_NAGLE 0
+#define TWRAP_NODELAY 1
 #define TWRAP_LISTEN 0
 #define TWRAP_CONNECT 1
 
@@ -24,10 +26,11 @@ struct twrap_addr {
 //public functions
 int twrapInit();
     //initializes socket functionality, returns 0 on success
-int twrapSocket(int, int, char*, char*);
+int twrapSocket(int, int, int, char*, char*);
     //protocol-agnostically creates a new socket configured according to the given parameters
     //sockets have to be created and bound/connected all at once to allow for protocol-agnosticity
     //int: Whether to make the socket blocking or not, either TWRAP_NOBLOCK or TWRAP_BLOCK
+    //int: Whether to disable Nagle's algorithm or not, either TWRAP_NAGLE or TWRAP_NODELAY
     //int: Mode of the socket
     //  TWRAP_LISTEN: Listen on given address (or all interfaces if NULL) and port, e.g. for a server
     //  TWRAP_CONNECT: Immediately connect to given address (localhost if NULL), e.g. for a client
@@ -37,6 +40,12 @@ int twrapSocket(int, int, char*, char*);
 int twrapAccept(int, struct twrap_addr*);
     //uses the given socket (must be TWRAP_LISTEN) to accept a new incoming connection, optionally returning its address
     //returns a socket handle for the new connection, or -1 on failure
+int twrapAddress(int, struct twrap_addr*);
+    //writes the address the given socket is bound to into given address pointer, useful when automatically assigning port
+    //returns 0 on success, non-zero on failure
+int twrapAddressInfo(struct twrap_addr*, char*, int, char*, int);
+    //writes the host/address and service/port of given address into given buffers (pointer + size), either buffer may be NULL
+    //returns 0 on success, non-zero on failure
 int twrapSend(int, char*, int);
     //uses the given socket (either TWRAP_CONNECT or returned by twrapAccept) to send given data (pointer + size)
     //returns how much data was actually sent (may be less than data size), or -1 on failure
